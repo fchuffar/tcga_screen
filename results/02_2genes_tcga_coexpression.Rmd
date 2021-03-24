@@ -1,0 +1,191 @@
+---
+title: "Coexpression of 2 genes in TCGA"
+author: "Florent Chuffart"
+date: "`r Sys.Date()`"
+output: 
+  rmarkdown::html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: true
+---
+
+
+TCGA Study Abbreviations:
+https://gdc.cancer.gov/resources-tcga-users/tcga-code-tables/tcga-study-abbreviations
+
+# Correlation
+
+```{r, echo=FALSE, eval=TRUE}
+# tcga_proj_forced_survival = c("TCGA-KIRC", "TCGA-LGG", "TCGA-CESC", "TCGA-LUAD"); gs = c("UHRF1", "KAT5"); rmarkdown::render("02_2genes_tcga_coexpression.Rmd", output_file=paste0("02_", gs[1], "_", gs[2], "_tcga_coexpression.html"))
+library(epimedtools)
+knitr::opts_chunk$set(collapse=TRUE, comment = "#>", fig.width=9, fig.height=6, eval=TRUE, echo=FALSE, results="hide")
+# genes
+genes = readRDS("~/projects/genes/bed_grch38_epimeddb.rds")
+dim(genes)
+```
+```{r}
+os_keys = c("os", "efs")
+os_keys = c("os")
+
+tcga_projects = c(
+  "TCGA-LUAD",
+  "TCGA-LUSC",
+  "TCGA-BRCA",
+  "TCGA-LIHC",
+  "TCGA-COAD",
+  "TCGA-HNSC",
+  "TCGA-DLBC",
+  "TCGA-MESO",
+  "TCGA-PRAD",
+  "TCGA-SARC",
+  "TCGA-TGCT",
+  "TCGA-BLCA", #
+  "TCGA-CESC", #
+  "TCGA-GBM", #
+  "TCGA-KIRC", #
+  "TCGA-KIRP", #
+  "TCGA-LGG", #
+  "TCGA-SKCM", #
+  "TCGA-THCA", #
+  # "TCGA-LAML", #
+  "TCGA-UCEC", #
+  "TCGA-ACC",
+  "TCGA-CHOL",
+  "TCGA-ESCA",
+  "TCGA-KICH",
+  "TCGA-PAAD",
+  "TCGA-PCPG",
+  "TCGA-READ",
+  "TCGA-STAD",
+  "TCGA-THYM",
+  "TCGA-UCS",
+  "TCGA-UVM",
+  "TCGA-OV"
+)
+if (exists("tcga_proj_forced_survival")) tcga_projects = unique(c(tcga_proj_forced_survival, tcga_projects))
+if (!exists("mreadRDS")) { mreadRDS = memoise::memoise(readRDS) }
+```
+
+
+```{r results="verbatim"}
+layout(1, respect=TRUE)
+foo = lapply(tcga_projects, function(tcga_project) {
+  print(tcga_project)
+  # tcga_project = "TCGA-LIHC"
+  # tcga_project = "TCGA-BRCA"
+  # tcga_project = "TCGA-LAML"
+  
+  study_trscr_filename = paste0("~/projects/tcga_studies/study_", tcga_project, "_trscr.rds")
+  s = mreadRDS(study_trscr_filename)
+  
+  m = lm(s$data[gs[2],] ~ s$data[gs[1],])
+  r2 = summary(m)$r.squared
+  d = s$data
+  idx_normal = rownames(s$exp_grp)[s$exp_grp$tissue_status=="normal"]
+  idx_tumoral = rownames(s$exp_grp)[s$exp_grp$tissue_status=="tumoral"]
+  col = rep(2, ncol(d))
+  names(col) = colnames(d)
+  col[idx_normal] = 4
+  plot(d[gs[1],], d[gs[2],], xlab=gs[1], ylab=gs[2], main=paste0(tcga_project, " R2=", signif(r2,3)), col=col) 
+  legend("bottomleft", col=c(2,4), pch=1, c("tumoral", "normal"))
+})
+```
+
+# Survival (high vs. low)
+
+```{r eval=TRUE, fig.width=9, fig.height=9, results="verbatim"}
+## Survival according to gene expression
+print(paste0("survival ", g))
+surv = lapply(tcga_projects, function(tcga_project) {
+  # tcga_project = "TCGA-LIHC"
+  print(tcga_project)
+  study_trscr_filename = paste0("~/projects/tcga_studies/study_", tcga_project, "_trscr.rds")
+  s = mreadRDS(study_trscr_filename)
+  idx_sample = rownames(s$exp_grp)[is.na(s$exp_grp$annotations_1_category) & s$exp_grp$tissue_status == "tumoral"]
+
+  layout(matrix(1:2, 1), respect=TRUE)
+  par("mar" = c(5.1, 4.1, 4.1, 2.1))
+  for (os_key in os_keys) {
+    survout = lapply(gs, function(g) {
+      main = paste0(tcga_project, " ", g, " ", os_key)
+      ss = s$exp_grp[idx_sample,os_key]
+      v = s$data[g,idx_sample]
+      res = coxres(ss, v)
+      pcox = res[1]
+      ret = epimedtools::plot_survival_panel_simple2(ss,v, main=main, censoring=mean(s$exp_grp[idx_sample,]$os_months, na.rm=TRUE) + 2*sd(s$exp_grp[idx_sample,]$os_months, na.rm=TRUE), PLOT_LEGEND=PLOT_LEGEND)
+      return(ret)
+    })
+    names(survout) = gs
+    
+    
+    
+    idx_normal = rownames(s$exp_grp)[s$exp_grp$tissue_status=="normal"]
+    idx_tumoral = rownames(s$exp_grp)[s$exp_grp$tissue_status=="tumoral"]
+    d = s$data[,idx_tumoral]
+    e = s$exp_grp[idx_tumoral,]
+    m = lm(d[gs[2],] ~ d[gs[1],])
+    r2 = summary(m)$r.squared
+    bd_up_1 = rev(survout[[gs[1]]]$boundaries)[2]
+    bd_dw_1 =    (survout[[gs[1]]]$boundaries)[2]
+    bd_up_2 = rev(survout[[gs[2]]]$boundaries)[2]
+    bd_dw_2 =    (survout[[gs[2]]]$boundaries)[2]
+
+    idx_hh = colnames(d)[d[gs[1],] >  bd_up_1 & d[gs[2],] >  bd_up_2]
+    idx_hl = colnames(d)[d[gs[1],] >  bd_up_1 & d[gs[2],] <= bd_dw_2]
+    idx_lh = colnames(d)[d[gs[1],] <= bd_dw_1 & d[gs[2],] >  bd_up_2]
+    idx_ll = colnames(d)[d[gs[1],] <= bd_dw_1 & d[gs[2],] <= bd_dw_2]
+
+    col = rep("grey", ncol(d))
+    names(col) = colnames(d)
+    cols = c("black", "red", "purple", "cyan")
+    
+    col[idx_hh] = cols[1]
+    col[idx_hl] = cols[2]
+    col[idx_lh] = cols[3]
+    col[idx_ll] = cols[4]
+    
+    ss = e[,os_key]
+    e$grp = NA
+    e[idx_hh, ]$grp = paste0(gs[1], " high / ", gs[2], " high")
+    e[idx_hl, ]$grp = paste0(gs[1], " high / ", gs[2], " low" )
+    e[idx_lh, ]$grp = paste0(gs[1], " low / ", gs[2], " high" )
+    e[idx_ll, ]$grp = paste0(gs[1], " low / ", gs[2], " low"  )   
+    # e$grp = fatcor(e$grep)
+    v = e$grp
+
+    layout(matrix(1:4,2), respect=TRUE)
+    plot(d[gs[1],], d[gs[2],], xlab=gs[1], ylab=gs[2], main=paste0(tcga_project, " R2=", signif(r2,3)), col=col, pch=1) 
+    abline(m, col="grey")
+    abline(v=survout[[gs[1]]]$boundaries, h=survout[[gs[2]]]$boundaries, lty=1, col="grey")
+    abline(v=survout[[gs[1]]]$boundaries, h=survout[[gs[2]]]$boundaries, lty=1, col="grey")
+    abline(v=c(bd_dw_1, bd_up_1), h=c(bd_dw_2, bd_up_2), lty=2, col=1)
+    legend("bottomleft", col=cols, pch=1, c(
+      paste0(gs[1], " high / ", gs[2], " high"),
+      paste0(gs[1], " high / ", gs[2], " low" ),
+      paste0(gs[1], " low / ", gs[2], " high" ),
+      paste0(gs[1], " low / ", gs[2], " low"  )
+      )
+    )    
+    plot(d[gs[1],], d[gs[2],], xlab=gs[1], ylab=gs[2], main=paste0(tcga_project, " R2=", signif(r2,3)), col=col, pch=1) 
+    abline(m, col="grey")
+    abline(v=survout[[gs[1]]]$boundaries, h=survout[[gs[2]]]$boundaries, lty=1, col="grey")
+    abline(v=c(bd_dw_1, bd_up_1), h=c(bd_dw_2, bd_up_2), lty=2, col=1)
+    epimedtools::scurve(ss, v, colors = cols, censoring=mean(s$exp_grp[idx_sample,]$os_months, na.rm=TRUE) + 2*sd(s$exp_grp[idx_sample,]$os_months, na.rm=TRUE))
+    epimedtools::scurve(ss, v, colors = cols, censoring=mean(s$exp_grp[idx_sample,]$os_months, na.rm=TRUE) + 2*sd(s$exp_grp[idx_sample,]$os_months, na.rm=TRUE),PLOT_LEGEND=FALSE)
+
+
+
+  }
+})
+```
+
+
+
+# Session Information
+
+```{r, results="verbatim"}
+sessionInfo()
+```
+
+

@@ -1,0 +1,392 @@
+---
+title: "Gene expression in TCGA"
+author: "Florent Chuffart"
+date: "`r Sys.Date()`"
+output: 
+  rmarkdown::html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: true
+---
+
+
+TCGA Study Abbreviations:
+https://gdc.cancer.gov/resources-tcga-users/tcga-code-tables/tcga-study-abbreviations
+
+
+
+
+
+
+```{r, echo=FALSE, eval=TRUE}
+# tcga_proj_forced_survival = c("TCGA-KIRC", "TCGA-LGG", "TCGA-CESC", "TCGA-LUAD"); PLOT_LEGEND=FALSE ; sapply(c("USP7", "UHRF1", "KAT5"), function(g){rmarkdown::render("01_gene_tcga_expression.Rmd", output_file=paste0("01_", g, "_tcga_expression.html"))})
+library(epimedtools)
+knitr::opts_chunk$set(collapse=TRUE, comment = "#>", fig.width=9, fig.height=6, eval=TRUE, echo=FALSE, results="hide")
+# genes
+genes = readRDS("~/projects/genes/bed_grch38_epimeddb.rds")
+dim(genes)
+```
+```{r}
+os_keys = c("os", "efs")
+os_keys = c("os")
+
+tcga_projects = c(
+  "TCGA-LUAD",
+  "TCGA-LUSC",
+  "TCGA-BRCA",
+  "TCGA-LIHC",
+  "TCGA-COAD",
+  "TCGA-HNSC",
+  "TCGA-DLBC",
+  "TCGA-MESO",
+  "TCGA-PRAD",
+  "TCGA-SARC",
+  "TCGA-TGCT",
+  "TCGA-BLCA", #
+  "TCGA-CESC", #
+  "TCGA-GBM", #
+  "TCGA-KIRC", #
+  "TCGA-KIRP", #
+  "TCGA-LGG", #
+  "TCGA-SKCM", #
+  "TCGA-THCA", #
+  # "TCGA-LAML", #
+  "TCGA-UCEC", #
+  "TCGA-ACC",
+  "TCGA-CHOL",
+  "TCGA-ESCA",
+  "TCGA-KICH",
+  "TCGA-PAAD",
+  "TCGA-PCPG",
+  "TCGA-READ",
+  "TCGA-STAD",
+  "TCGA-THYM",
+  "TCGA-UCS",
+  "TCGA-UVM",
+  "TCGA-OV"
+)
+if (exists("tcga_proj_forced_survival")) { tcga_projects = unique(c(tcga_proj_forced_survival, tcga_projects)) }
+if (!exists("mreadRDS")) { mreadRDS = memoise::memoise(readRDS) }
+```
+
+# Summary
+
+```{r results="verbatim"}
+surv = lapply(tcga_projects, function(tcga_project) {
+  print(tcga_project)
+  # tcga_project = "TCGA-LIHC"
+  # tcga_project = "TCGA-BRCA"
+  # tcga_project = "TCGA-LAML"
+  
+  study_trscr_filename = paste0("~/projects/tcga_studies/study_", tcga_project, "_trscr.rds")
+  s = mreadRDS(study_trscr_filename)
+  if (!"annotations_1_category"%in%colnames(s$exp_grp)) {
+    s$exp_grp$annotations_1_category = NA
+  } 
+  idx_sample = rownames(s$exp_grp)[is.na(s$exp_grp$annotations_1_category) & s$exp_grp$tissue_status == "tumoral"]
+  pcox=c()
+  sign = ""
+  os_key = "os"
+  if (os_key %in% colnames(s$exp_grp)) {
+      ss = s$exp_grp[idx_sample,os_key]
+      v = s$data[g,idx_sample]
+      res = coxres(ss, v)
+      pcox[os_key] = res[1]          
+      if (pcox[os_key] <= 0.05 ) {
+        sign = "**"              
+      }
+  } else {
+    pcox[os_key] = NA
+    card = NA
+  }    
+  ret = list(proj=tcga_project, gene=g, pcox_os=pcox[os_key], sign=sign)
+  return(ret)  
+})
+surv = do.call(rbind, surv)
+surv = surv[order(unlist(surv[,"pcox_os"])),]
+surv = surv[order(unlist(surv[,"sign"]), decreasing=TRUE),]
+surv = data.frame(surv)
+print(surv)
+
+if (!exists("surv_glo")) surv_glo = list()
+surv_glo[[g]] = surv
+surv_glo <<- surv_glo
+
+# foo = sapply(rownames(features), function(g) {
+#   foo = surv_glo[[g]]
+#   rownames(foo) = foo[,1]
+#   unlist(foo[tcga_projects,"sign"]) != ""
+# })
+# rownames(foo)=tcga_projects
+# foo
+# apply(foo, 1, sum)
+# sort(apply(foo, 1, sum))
+# foo[names(sort(apply(foo, 1, sum))),]
+```
+
+
+
+# TCGA projects
+
+```{r}
+tcga_stat = lapply(tcga_projects, function(tcga_project) {
+  # tcga_project = "TCGA-LUAD"
+  # print(tcga_project)
+  study_trscr_filename = paste0("~/projects/tcga_studies/study_", tcga_project, "_trscr.rds")
+  s = mreadRDS(study_trscr_filename)
+  # print(dim(s$data))
+  idx_normal = rownames(s$exp_grp)[s$exp_grp$tissue_status=="normal"]
+  idx_tumoral = rownames(s$exp_grp)[s$exp_grp$tissue_status=="tumoral"]
+  if (!"annotations_1_category" %in% colnames(s$exp_grp)) {
+    s$exp_grp$annotations_1_category = NA
+  } else {
+    if (length(unique(s$exp_grp$annotations_1_category))==1) {
+      s$exp_grp$annotations_1_category = NA    
+    }    
+  }
+  idx_normal2 = rownames(s$exp_grp)[s$exp_grp$tissue_status=="normal"   & is.na(s$exp_grp$annotations_1_category)]
+  idx_tumoral2 = rownames(s$exp_grp)[s$exp_grp$tissue_status=="tumoral" & is.na(s$exp_grp$annotations_1_category)]    
+  ret = list(proj=tcga_project, nb_tumor=length(idx_tumoral), nb_ctrl=length(idx_normal), nb_tumor2=length(idx_tumoral2), nb_ctrl2=length(idx_normal2))
+  return(ret)
+})
+tcga_stat = do.call(rbind, tcga_stat)
+```
+
+```{r eval=TRUE, results="none", fig.width=6, fig.height=4}
+tcga_stat
+```
+
+
+
+# Gene expression
+
+```{r eval=TRUE, results="none", fig.width=6, fig.height=4}
+
+data_full = lapply(tcga_projects, function(tcga_project) {
+  # tcga_project = "TCGA-LAML"
+  # print(tcga_project)
+  study_trscr_filename = paste0("~/projects/tcga_studies/study_", tcga_project, "_trscr.rds")
+  s = mreadRDS(study_trscr_filename)
+  idx_sample = rownames(s$exp_grp)[is.na(s$exp_grp$annotations_1_category)]
+  res = data.frame(expr=s$data[g,idx_sample], status=s$exp_grp[idx_sample,]$tissue_status, proj=tcga_project)
+  return(res)
+})
+data_full = do.call(rbind, data_full)
+data_full$proj = as.factor(data_full$proj)
+data_full$status = factor(data_full$status, levels=c("normal", "tumoral"))
+```
+
+
+## Non tumoral
+
+```{r eval=TRUE, results="none", fig.width=6, fig.height=4}
+data_nt = data_full[data_full$status == "normal",]
+# ANOVA
+m = lm(expr~proj, data_nt)
+# anova(m)
+# m$coeff
+data_nt$proj = as.factor(data_nt$proj)
+# unique(data_nt$proj)
+substr(names(sort(m$coefficients[-1])), 5, 1000)
+intercept = m$coefficients[1]
+lev = m$coefficients[-1]  
+names(lev) = substr(names(lev), 5, 1000)
+lev[levels(data_nt$proj)[1]] = 0
+lev = lev[order(lev)]
+lev = lev + intercept
+data_nt$proj = factor(data_nt$proj, levels=names(lev))
+beanplot::beanplot(expr~proj, data_nt, las=2, log="",  bw="nrd0", cex.axis=.7, main=paste0(g, " expr. in NT"), ylab="log(expr.)")
+points(1:length(lev),lev, col=2)
+legend("bottomright", "mean in NT", pch=1, col=2)
+boxplot(expr~proj, data_nt, las=2, log="",  bw="nrd0", cex.axis=.7, main=paste0(g, " expr. in NT"), ylab="log(expr.)")
+```
+
+
+
+## Tumoral
+
+```{r}
+data_tum = data_full[data_full$status == "tumoral",]
+data_tum$proj = factor(data_tum$proj, levels=names(lev))
+
+beanplot::beanplot(expr~proj, data_tum, las=2, log="",  bw="nrd0", cex.axis=.7, main=paste0(g, " expr. in T"), ylab="log(expr.)")
+points(1:length(lev),lev, col=2)
+legend("bottomright", "mean in NT", pch=1, col=2)
+
+
+m2 = lm(expr~proj, data_tum)
+anova(m2)
+m2$coeff
+
+intercept2 = m2$coefficients[1]
+lev2 = m2$coefficients[-1]  
+names(lev2) = substr(names(lev2), 5, 1000)
+lev2[levels(data_tum$proj)[1]] = 0
+lev2 = lev2[order(lev2)]
+lev2 = lev2 + intercept2
+data_tum$proj = factor(data_tum$proj, levels=names(lev2))
+beanplot::beanplot(expr~proj, data_tum, las=2, log="",  bw="nrd0", cex.axis=.7, main=paste0(g, " expr. in T"), ylab="log(expr.)")
+points(1:length(lev),lev[names(lev2)], col=2)
+legend("bottomright", "mean in NT", pch=1, col=2)
+boxplot(expr~proj, data_tum, las=2, log="",  bw="nrd0", cex.axis=.7, main=paste0(g, " expr. in T"), ylab="log(expr.)", col="grey")
+points(1:length(lev),lev[names(lev2)], col=2)
+legend("bottomright", "mean in NT", pch=1, col=2)
+
+# data_tum$lograt = data_tum$expr - lev[as.character(data_tum$proj)]
+# mean(data_tum[data_tum$proj%in%"TCGA-UCEC", ]$lograt)
+# beanplot::beanplot(lograt~proj, data_tum, las=2, log="",  bw="nrd0", cex.axis=.7, main=paste0(g, " expr. in T"), ylab="logratio = log(T/NT)")
+# # points(1:length(lev2),lev2, col=2)
+# # boxplot(expr~proj, data_tum, las=2, log="",  bw="nrd0", cex.axis=.7, main=paste0(g, " expr. in T"))
+#
+# m3 = lm(lograt~proj, data_tum)
+# anova(m3)
+# m3$coeff
+# intercept3 = m3$coefficients[1]
+# lev3 = m3$coefficients[-1]
+# names(lev3) = substr(names(lev3), 5, 1000)
+# lev3[levels(data_tum$proj)[1]] = 0
+# lev3 = lev3[order(lev3)]
+# lev3 = lev3 + intercept3
+# data_tum$proj = factor(data_tum$proj, levels=names(lev3))
+# beanplot::beanplot(lograt~proj, data_tum, las=2, log="",  bw="nrd0", cex.axis=.7, main=paste0(g, " expr. in T"), ylab="logratio = log(T/NT)")
+# # points(1:length(lev),lev[names(lev3)], col=2)
+# boxplot(lograt~proj, data_tum, las=2, log="",  bw="nrd0", cex.axis=.7, main=paste0(g, " expr. in T"), ylab="logratio = log(T/NT)")
+
+
+anadiff_res = sapply(unique(data_nt$proj), function(p) {
+  # p = "TCGA-GBM"
+  # print(p)
+  # t_pval = t.test(data_nt[data_nt$proj==p,]$expr, data_tum[data_tum$proj==p,]$expr)$p.value
+  mw_pval = wilcox.test(data_nt[data_nt$proj%in%p,]$expr, data_tum[data_tum$proj%in%p,]$expr)$p.value
+  fc = mean(data_tum[data_tum$proj%in%p,]$expr) - mean(data_nt[data_nt$proj%in%p,]$expr)
+  return(c(mw_pval=mw_pval, fc=fc))
+})
+anadiff_res = data.frame(t(anadiff_res))
+anadiff_res$mw_padj = p.adjust(anadiff_res$mw_pval)
+anadiff_res$up = anadiff_res$mw_padj < 0.05 & anadiff_res$fc > 0
+anadiff_res$down = anadiff_res$mw_padj < 0.05 & anadiff_res$fc < 0
+
+```
+
+
+
+
+
+
+
+# Survival
+
+
+```{r eval=FALSE}
+## Global survival
+
+layout(matrix(1:2, 1), respect=TRUE)
+par("mar" = c(5.1, 4.1, 4.1, 2.1))
+foo = lapply(tcga_projects, function(tcga_project) {
+  # tcga_project = "TCGA-LUAD"
+  print(tcga_project)
+  study_trscr_filename = paste0("~/projects/tcga_studies/study_", tcga_project, "_trscr.rds")
+  s = mreadRDS(study_trscr_filename)
+  idx_tumoral2 = rownames(s$exp_grp)[s$exp_grp$tissue_status=="tumoral" & is.na(s$exp_grp$annotations_1_category)]    
+  for (os_key in os_keys) {
+    main = paste0(tcga_project, " (", length(idx_tumoral2), " tumors) ", os_key)
+    if (os_key %in% colnames(s$exp_grp)) {
+      beanplot::beanplot(s$exp_grp[idx_tumoral2,]$os_months~as.logical(s$exp_grp[idx_tumoral2,]$dead), mian="dead", ylab="months", log="")
+      q = mean(s$exp_grp[idx_tumoral2,]$os_months, na.rm=TRUE) + 2*sd(s$exp_grp[idx_tumoral2,]$os_months, na.rm=TRUE)
+      abline(h=q)
+      epimedtools::scurve(s$exp_grp[idx_tumoral2,os_key], main=main, censoring=q)    
+    } else {
+      plot(0, main=main)
+    }    
+  }
+})
+# stop("EFN")
+```
+
+
+```{r eval=TRUE, fig.width=6, fig.height=6}
+## Survival according to gene expression
+print(paste0("survival ", g))
+surv = lapply(tcga_projects, function(tcga_project) {
+  # tcga_project = "TCGA-LIHC"
+  print(tcga_project)
+  study_trscr_filename = paste0("~/projects/tcga_studies/study_", tcga_project, "_trscr.rds")
+  s = mreadRDS(study_trscr_filename)
+  idx_sample = rownames(s$exp_grp)[is.na(s$exp_grp$annotations_1_category) & s$exp_grp$tissue_status == "tumoral"]
+  # idx_off = idx_sample[s$data[g,idx_sample] < thresh]
+  # idx_on  = idx_sample[s$data[g,idx_sample] >= thresh]
+  layout(matrix(1:2, 1), respect=TRUE)
+  par("mar" = c(5.1, 4.1, 4.1, 2.1))
+  pcox=c()
+  sign = ""
+  for (os_key in os_keys) {
+    main = paste0(tcga_project, " ", g, " ", os_key)
+    # epimedtools::plot_survival_panel_simple(g, idx_tumoral2, s, ss_key=os_key, main=main)
+    if (os_key %in% colnames(s$exp_grp)) {
+        ss = s$exp_grp[idx_sample,os_key]
+        v = s$data[g,idx_sample]
+        res = coxres(ss, v)
+        pcox[os_key] = res[1]          
+
+        # pdf()
+        # res2 = epimedtools::plot_survival_panel_simple2(ss,v, main=main, censoring=mean(s$exp_grp[idx_sample,]$os_months, na.rm=TRUE) + 2*sd(s$exp_grp[idx_sample,]$os_months, na.rm=TRUE))
+        # dev.off()  
+        # card = paste(res2$card, collapse="_")
+        # pval_opt = res2$pval_opt
+        # pval_opt = pcox_efs
+        if  (pcox["os"]<=0.05 | tcga_project %in% tcga_proj_forced_survival) {
+          sign = "*"
+          if (FALSE) {
+            # epimedtools::plot_survival_panel_simple2(ss,v, main=main, censoring=mean(s$exp_grp[idx_sample,]$os_months, na.rm=TRUE) + 2*sd(s$exp_grp[idx_sample,]$os_months, na.rm=TRUE), thresh=mean(data_norm$expr) + 3*sd(data_norm$expr))
+          } else {
+            epimedtools::plot_survival_panel_simple2(ss,v, main=main, censoring=mean(s$exp_grp[idx_sample,]$os_months, na.rm=TRUE) + 2*sd(s$exp_grp[idx_sample,]$os_months, na.rm=TRUE), PLOT_LEGEND=PLOT_LEGEND)          
+          }
+          if (pcox[os_key] <= 0.05 ) {
+            sign = "**"              
+          }
+          # res = epimedtools::scurve(ss, v, main=main, censoring=mean(s$exp_grp[idx_sample,]$os_months, na.rm=TRUE) + 2*sd(s$exp_grp[idx_sample,]$os_months, na.rm=TRUE))
+        }
+      # } else {
+      #   pcox[os_key] = NA
+      # }
+    } else {
+      pcox[os_key] = NA
+      card = NA
+    }    
+  }
+  ret = list(proj=tcga_project, gene=g, pcox_os=pcox["os"], sign=sign)#, card=card)#, pcox_efs=pcox["efs"], nb_on=length(idx_on), nb_off=length(idx_off), sign=sign)
+  return(ret)  
+})
+surv = do.call(rbind, surv)
+surv = surv[order(unlist(surv[,"pcox_os"])),]
+surv = surv[order(unlist(surv[,"sign"]), decreasing=TRUE),]
+surv = data.frame(surv)
+print(surv)
+```
+
+```{r results="verbatim"}
+print(surv)
+WriteXLS::WriteXLS(surv, paste0("01_", g, "_tcga_expression.xlsx"), AdjWidth = TRUE, BoldHeaderRow = TRUE)
+```
+
+# Results
+
+We studied `r g` expression in The Cancer Genome Atlas cohort: `r nrow(data_full)` samples, dispatched over `r length(unique(data_full$proj))` cancer types. This dataset includes `r  sum(!is.na(data_tum$proj))` tumoral samples associated to `r  nrow(data_nt)` non tumoral samples (associated with TCGA datasets of `r length(unique(data_nt$proj))` cancer subtypes). 
+It appears that, comparatively to non tumoral samples, `r g` is over expressed in `r sum(anadiff_res$up)`/`r nrow(anadiff_res)` cancer type(s) and under expressed in `r sum(anadiff_res$down)`/`r nrow(anadiff_res)` cancer type(s) (Mann Whitney p-value corrected for 5% FDR using Benjamini Hochberg method < 5%).
+Moreover, this gene is significatively associated with prognosis in `r sum(surv$pcox_os < 0.05)`/`r nrow(surv)` cancer types (Cox model logrank test p-value < 0.05).
+
+
+
+
+
+
+
+
+# Session Information
+
+```{r, results="verbatim"}
+sessionInfo()
+```
+
+
